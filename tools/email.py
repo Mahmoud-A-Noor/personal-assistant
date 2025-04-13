@@ -1,5 +1,5 @@
 import os
-from typing import List
+from typing import List, Optional
 import anyio
 import functools
 from pydantic_ai import Tool
@@ -18,10 +18,8 @@ class EmailTool:
     """Tool for email operations."""
     
     def __init__(self):
-        """Initialize with credentials from environment variables."""
-        # Try loading .env file if vars aren't set
         load_dotenv()
-        
+        """Initialize with credentials from environment variables."""
         self.smtp_server = os.getenv('SMTP_SERVER')
         self.smtp_port = int(os.getenv('SMTP_PORT', '587'))
         self.imap_server = os.getenv('IMAP_SERVER')
@@ -56,11 +54,10 @@ class EmailTool:
             raise RuntimeError(f"Failed to send email: {e}")
 
     async def read_inbox_emails(self, unread_only: bool = False, limit: int = 10) -> List[EmailMessage]:
-        """Read emails specifically from the inbox folder."""
+        """Read emails specifically from the inbox."""
         try:
             read_fn = functools.partial(
-                self._read_emails,
-                folder='inbox',
+                self._read_inbox_emails,
                 unread_only=unread_only,
                 limit=limit
             )
@@ -92,35 +89,35 @@ class EmailTool:
             server.send_message(msg)
         return True
 
-    def _read_emails(self, folder: str, unread_only: bool, limit: int) -> List[EmailMessage]:
-        """Sync implementation of read_emails with folder support."""
+    def _read_inbox_emails(self, unread_only: bool, limit: int) -> List[EmailMessage]:
+        """Sync implementation for reading inbox emails."""
         emails = []
         with imaplib.IMAP4_SSL(self.imap_server, self.imap_port) as mail:
             mail.login(self.email_address, self.password)
-            mail.select(folder)
+            mail.select('inbox')  # Explicitly select only the inbox
 
             status, messages = mail.search(None, 'UNSEEN' if unread_only else 'ALL')
             if status != 'OK':
                 return []
-                
-            for msg_id in messages[0].split()[:limit]:
+
+            message_ids = messages[0].split()[:limit]
+            for msg_id in message_ids:
                 status, msg_data = mail.fetch(msg_id, '(BODY.PEEK[])')
                 if status != 'OK':
                     continue
-                    
-                msg = email.message_from_bytes(msg_data[0][1])
+
+                email_message = email.message_from_bytes(msg_data[0][1])
+                
                 emails.append({
-                    "sender": msg['from'],
-                    "recipient": msg['to'],
-                    "subject": msg['subject'],
-                    "body": self._extract_email_body(msg),
-                    "date": self._parse_email_date(msg['date']),
-                    "read": False,
+                    "sender": email_message['from'],
+                    "recipient": email_message['to'],
+                    "subject": email_message['subject'],
+                    "body": self._extract_email_body(email_message),
+                    "date": self._parse_email_date(email_message['date']),
+                    "read": False,  # Assume unread since we're not marking as read
                     "message_id": msg_id.decode()
                 })
-        
-        # Sort by date (newest first)
-        return sorted(emails, key=lambda x: x['date'], reverse=True)
+        return emails
 
     def _mark_as_read(self, message_id: str) -> bool:
         """Sync implementation of mark_as_read."""
@@ -156,18 +153,27 @@ class EmailTool:
                 email_date = datetime.now()
         return email_date
 
-# Tool registration
-email_tool = EmailTool()
+def get_email_tools() -> List[Tool]:
+    """Creates email management tools."""
+    email_client = EmailTool()
+    
+    return [
+        Tool(
+            email_client.send_email,
+            name="email_send",
+            description="Send an email to specified recipients"
+        ),
+        Tool(
+            email_client.read_inbox_emails,
+            name="email_read_inbox",
+            description="Read emails from the inbox folder"
+        ),
+        Tool(
+            email_client.mark_as_read,
+            name="email_mark_read",
+            description="Mark an inbox email as read"
+        )
+    ]
 
-tools = [
-    Tool(
-        email_tool.read_inbox_emails,
-        name="email_read_inbox",
-        description="Read emails from the inbox folder"
-    ),
-    Tool(
-        email_tool.mark_as_read,
-        name="email_mark_read",
-        description="Mark an email as read"
-    )
-]
+# Initialize email tools
+tools = get_email_tools()

@@ -245,7 +245,7 @@
 #         elif field == "tags":
 #             item.metadata.tags = value
 
-# def knowledge_tool(kb: Optional[KnowledgeBase] = None, max_results: int = 5) -> List[Tool]:
+# def get_knowledge_tools(kb: Optional[KnowledgeBase] = None, max_results: int = 5) -> List[Tool]:
 #     """Creates knowledge base tools.
     
 #     Args:
@@ -308,6 +308,3 @@
 #             description='Add a topic to a knowledge item\'s metadata'
 #         )
 #     ]
-
-# # Initialize tools with default knowledge base
-# tools = knowledge_tool()

@@ -2,14 +2,14 @@ import os
 from dotenv import load_dotenv
 
 from core.assistant import PersonalAssistant
-from tools.email import tools as email_tools, EmailTool
+from tools.email import get_email_tools
 
 # Load environment variables
 load_dotenv()
 
-# Create assistant with email tools
+# Initialize assistant with both email and knowledge tools
 personal_assistant = PersonalAssistant(
-    model='google-gla:gemini-2.0-flash',
+    model="google-gla:gemini-2.0-flash",
     system_prompt="""
       You are Noori - a smart personal assistant focused on email management.
 
@@ -23,10 +23,8 @@ personal_assistant = PersonalAssistant(
       - handle errors gracefully
       - Only ask questions if absolutely necessary
    """,
-    tools=email_tools
+    tools=get_email_tools()
 )
-
-et = EmailTool()
 
 # Main interaction loop
 async def main():

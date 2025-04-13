@@ -12,8 +12,7 @@ class Message(BaseModel):
     content: str
     role: MessageRole
     timestamp: datetime = Field(default_factory=datetime.now)
-    metadata: dict = Field(default_factory=dict)
-    embedding: Optional[List[float]] = None
+    embedding: List[float] = None
 
 class Conversation(BaseModel):
     id: str

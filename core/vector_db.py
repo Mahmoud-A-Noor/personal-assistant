@@ -2,7 +2,7 @@ from typing import List, Optional
 import os
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct, Distance, VectorParams
-from core.models import Message
+from models.conversation import Message
 from utils.embedding import LocalEmbedder
 
 
@@ -41,7 +41,7 @@ class VectorMemory:
             payload={
                 "content": message.content,
                 "role": message.role.value,
-                "metadata": message.metadata,
+                "embedding": embedding,
                 "timestamp": message.timestamp.isoformat()
             }
         )
@@ -58,5 +58,4 @@ class VectorMemory:
             query_vector=query_embedding,
             limit=num_results
         )
-        
         return [Message(**result.payload) for result in results]

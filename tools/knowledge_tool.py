@@ -1,195 +1,313 @@
-from typing import List, Optional, Dict, Union
-from pydantic import BaseModel, field_validator
+from typing import Dict, Any, Optional, List, Union, TypedDict
+from dataclasses import dataclass
+import anyio
+import functools
+from pydantic import BaseModel, field_validator, Field
 from pydantic_ai import Tool
-from core.knowledge import KnowledgeBase, KnowledgeMetadata
-from typing_extensions import Literal
+from core.knowledge import KnowledgeBase
+from models.knowledge import (
+    KnowledgeUpdateInput,
+    MetadataUpdateInput,
+    BatchMetadataUpdateInput,
+    BatchKnowledgeUpdateInput
+)
 
-class KnowledgeToolInput(BaseModel):
-    query: str
-    limit: int = 3
-
-class KnowledgeUpdateInput(BaseModel):
+class KnowledgeResult(TypedDict):
+    """A knowledge base search result."""
+    id: str
+    """Unique identifier"""
     title: str
+    """Item title"""
     content: str
-    source: Optional[Literal["conversation", "manual", "web", "other"]] = None
-    importance: Optional[int] = None
-    related_topics: Optional[List[str]] = None
-    references: Optional[List[str]] = None
-    language: Optional[str] = None
+    """Item content"""
+    metadata: dict
+    """Associated metadata"""
+    score: Optional[float]
+    """Similarity score (0-1) for semantic search results"""
+
+@dataclass
+class KnowledgeSearchTool:
+    """The Knowledge search tool."""
     
-    def to_metadata(self) -> KnowledgeMetadata:
-        """Convert input to KnowledgeMetadata"""
-        return KnowledgeMetadata(
-            source=self.source,
-            importance=self.importance,
-            related_topics=self.related_topics or [],
-            references=self.references or [],
-            language=self.language or "en"
-        )
-
-class MetadataQueryInput(BaseModel):
-    field: Literal["importance", "related_topics", "references", "language", "tags", "source"]
-    value: Union[int, List[str], str]
-    limit: int = 10
-
-class MetadataUpdateInput(BaseModel):
-    id: Optional[str] = None
-    query: Optional[str] = None
-    field: Literal["importance", "related_topics", "references", "language", "tags"]
-    value: Union[int, List[str], str]
+    kb: KnowledgeBase
+    """The knowledge base instance."""
     
-    @field_validator('id', 'query')
-    def validate_id_or_query(cls, v, values):
-        if not v and not values.get('query'):
-            raise ValueError('Either id or query must be provided')
-        return v
-
-class BatchMetadataUpdateInput(BaseModel):
-    updates: List[MetadataUpdateInput]
+    max_results: int = 5
+    """Maximum number of results to return."""
     
-    @field_validator('updates')
-    def validate_unique_ids(cls, v):
-        ids = [update.id for update in v if update.id]
-        if len(ids) != len(set(ids)):
-            raise ValueError('Batch updates must have unique IDs')
-        return v
-
-class BatchKnowledgeUpdateInput(BaseModel):
-    items: List[KnowledgeUpdateInput]
-    
-    @field_validator('items')
-    def validate_items(cls, v):
-        if not v:
-            raise ValueError('Batch must contain at least one item')
-        return v
-
-
-class KnowledgeTool(Tool):
-    def __init__(self, knowledge_base: Optional[KnowledgeBase] = None, max_retries: int = 3):
-        self.kb = knowledge_base or KnowledgeBase()
-        self.max_retries = 3
-        self.name = "Knowledge-Tool-Kit"
-        self.description = "A tool kit for managing and searching knowledge base"
+    async def search(self, query: str) -> List[KnowledgeResult]:
+        """Searches knowledge base using full-text search.
         
+        Args:
+            query: Search term to look for.
+            
+        Returns:
+            List of matching knowledge items.
+        """
+        search_fn = functools.partial(self.kb.search_knowledge, query, self.max_results)
+        results = await anyio.to_thread.run_sync(search_fn)
+        if len(results) == 0:
+            raise RuntimeError('No search results found.')
+        return results
+
+    async def semantic_search(self, query: str) -> List[KnowledgeResult]:
+        """Find semantically similar knowledge using vector embeddings.
         
-    def search(self, input: KnowledgeToolInput) -> List[dict]:
-        """Search knowledge base for relevant information"""
-        return self.kb.search_knowledge(input.query, input.limit)
+        Args:
+            query: Natural language query string.
+            
+        Returns:
+            List of similar knowledge items.
+        """
+        search_fn = functools.partial(self.kb.semantic_search, query, self.max_results)
+        results = await anyio.to_thread.run_sync(search_fn)
+        if len(results) == 0:
+            raise RuntimeError('No similar items found.')
+        return results
+
+    async def query_by_metadata(self, field: str, value: Union[int, List[str], str]) -> List[KnowledgeResult]:
+        """Search knowledge base by specific metadata field.
+        
+        Args:
+            field: Metadata field to query.
+            value: Value to query for.
+            
+        Returns:
+            List of matching knowledge items.
+        """
+        query_fn = functools.partial(self.kb.query_by_metadata, field, value, self.max_results)
+        results = await anyio.to_thread.run_sync(query_fn)
+        if len(results) == 0:
+            raise RuntimeError('No items found matching metadata criteria.')
+        return results
+
+@dataclass
+class KnowledgeManagementTool:
+    """Tool for managing knowledge items."""
     
-    def upsert(self, input: KnowledgeUpdateInput) -> bool:
-        """Add or update knowledge in the knowledge base"""
-        return self.kb.upsert_knowledge(
+    kb: KnowledgeBase
+    """The knowledge base instance."""
+    
+    async def upsert(self, input: KnowledgeUpdateInput) -> bool:
+        """Add or update knowledge in the knowledge base.
+        
+        Args:
+            input: Knowledge update input containing title, content and metadata.
+            
+        Returns:
+            True if operation succeeded.
+        """
+        upsert_fn = functools.partial(
+            self.kb.upsert_knowledge,
             title=input.title,
             content=input.content,
             metadata=input.to_metadata()
         )
-    
-    def batch_upsert(self, input: BatchKnowledgeUpdateInput) -> List[bool]:
-        """Batch upsert multiple knowledge items"""
-        results = []
-        for item in input.items:
-            try:
-                success = self.upsert(item)
-                results.append(success)
-            except Exception as e:
-                print(f"Error upserting item: {e}")
-                results.append(False)
-        return results
-    
-    def update_metadata(self, input: MetadataUpdateInput) -> bool:
-        """Update a specific metadata field for a knowledge item"""
-        if input.id:
-            item = self.kb.find_similar_knowledge(input.id)
-            if not item:
-                return False
-        else:
-            items = self.kb.search_knowledge(input.query, 1)
-            if not items:
-                return False
-            item = items[0]
+        return await anyio.to_thread.run_sync(upsert_fn)
+
+    async def update_metadata(self, input: MetadataUpdateInput) -> bool:
+        """Update specific metadata field for a knowledge item.
         
-        # Update the specific field
-        if input.field == "importance":
-            item.metadata.importance = input.value
-        elif input.field == "related_topics":
-            item.metadata.related_topics = input.value
-        elif input.field == "references":
-            item.metadata.references = input.value
-        elif input.field == "language":
-            item.metadata.language = input.value
-        elif input.field == "tags":
-            item.metadata.tags = input.value
+        Args:
+            input: Metadata update input containing field and value.
             
-        return self.kb.upsert_knowledge(
+        Returns:
+            True if update succeeded.
+        """
+        item = await self._get_item_for_update(input)
+        if not item:
+            return False
+        
+        await self._apply_metadata_update(item, input.field, input.value)
+        upsert_fn = functools.partial(
+            self.kb.upsert_knowledge,
             title=item.title,
             content=item.content,
             metadata=item.metadata
         )
-    
-    def batch_update_metadata(self, input: BatchMetadataUpdateInput) -> List[bool]:
-        """Batch update metadata for multiple knowledge items"""
+        return await anyio.to_thread.run_sync(upsert_fn)
+
+    async def batch_upsert(self, input: BatchKnowledgeUpdateInput) -> List[bool]:
+        """Batch upsert multiple knowledge items.
+        
+        Args:
+            input: Batch of knowledge items to upsert.
+            
+        Returns:
+            List of success status for each item.
+        """
+        results = []
+        for item in input.items:
+            result = await self.upsert(item)
+            results.append(result)
+        return results
+
+    async def batch_update_metadata(self, input: BatchMetadataUpdateInput) -> List[bool]:
+        """Batch update metadata for multiple items.
+        
+        Args:
+            input: Batch of metadata updates.
+            
+        Returns:
+            List of success status for each update.
+        """
         results = []
         for update in input.updates:
-            results.append(self.update_metadata(update))
+            result = await self.update_metadata(update)
+            results.append(result)
         return results
-    
-    def query_by_metadata(self, input: MetadataQueryInput) -> List[dict]:
-        """Search knowledge base by metadata field"""
-        # Get all items
-        items = self.kb.search_knowledge("", input.limit)
+
+    async def get_metadata(self, id: str) -> Optional[dict]:
+        """Get metadata for a specific item.
         
-        # Filter by metadata
-        filtered = []
-        for item in items:
-            metadata = item["metadata"]
-            if input.field == "importance" and metadata["importance"] == input.value:
-                filtered.append(item)
-            elif input.field == "related_topics" and any(topic in metadata["related_topics"] for topic in input.value):
-                filtered.append(item)
-            elif input.field == "references" and any(ref in metadata["references"] for ref in input.value):
-                filtered.append(item)
-            elif input.field == "language" and metadata["language"] == input.value:
-                filtered.append(item)
-            elif input.field == "tags" and any(tag in metadata["tags"] for tag in input.value):
-                filtered.append(item)
-            elif input.field == "source" and metadata["source"] == input.value:
-                filtered.append(item)
+        Args:
+            id: Item ID.
+            
+        Returns:
+            Metadata dictionary if found.
+        """
+        get_fn = functools.partial(self.kb.get_by_id, id)
+        item = await anyio.to_thread.run_sync(get_fn)
+        return item.metadata.dict() if item else None
+
+    async def add_reference(self, id: str, reference: str) -> bool:
+        """Add a reference to an item's metadata.
         
-        return filtered
-    
-    def get_metadata(self, id: str) -> Optional[dict]:
-        """Get all metadata for a specific knowledge item"""
-        item = self.kb.find_similar_knowledge(id)
-        if item:
-            return item.metadata.dict()
-        return None
-    
-    def add_reference(self, id: str, reference: str) -> bool:
-        """Add a reference to a knowledge item"""
-        item = self.kb.find_similar_knowledge(id)
+        Args:
+            id: Item ID.
+            reference: Reference to add.
+            
+        Returns:
+            True if reference was added.
+        """
+        get_fn = functools.partial(self.kb.get_by_id, id)
+        item = await anyio.to_thread.run_sync(get_fn)
         if not item:
             return False
-            
+        
         if reference not in item.metadata.references:
             item.metadata.references.append(reference)
-            return self.kb.upsert_knowledge(
+            upsert_fn = functools.partial(
+                self.kb.upsert_knowledge,
                 title=item.title,
                 content=item.content,
                 metadata=item.metadata
             )
+            return await anyio.to_thread.run_sync(upsert_fn)
         return True
-    
-    def add_topic(self, id: str, topic: str) -> bool:
-        """Add a related topic to a knowledge item"""
-        item = self.kb.find_similar_knowledge(id)
+
+    async def add_topic(self, id: str, topic: str) -> bool:
+        """Add a topic to an item's metadata.
+        
+        Args:
+            id: Item ID.
+            topic: Topic to add.
+            
+        Returns:
+            True if topic was added.
+        """
+        get_fn = functools.partial(self.kb.get_by_id, id)
+        item = await anyio.to_thread.run_sync(get_fn)
         if not item:
             return False
-            
+        
         if topic not in item.metadata.related_topics:
             item.metadata.related_topics.append(topic)
-            return self.kb.upsert_knowledge(
+            upsert_fn = functools.partial(
+                self.kb.upsert_knowledge,
                 title=item.title,
                 content=item.content,
                 metadata=item.metadata
             )
+            return await anyio.to_thread.run_sync(upsert_fn)
         return True
+
+    async def _get_item_for_update(self, input: MetadataUpdateInput):
+        """Helper to retrieve item for update operations."""
+        if input.id:
+            get_fn = functools.partial(self.kb.get_by_id, input.id)
+            return await anyio.to_thread.run_sync(get_fn)
+        else:
+            search_fn = functools.partial(self.kb.search_knowledge, input.query, 1)
+            results = await anyio.to_thread.run_sync(search_fn)
+            return results[0] if results else None
+
+    async def _apply_metadata_update(self, item, field: str, value):
+        """Helper to apply metadata updates."""
+        if field == "importance":
+            item.metadata.importance = value
+        elif field == "related_topics":
+            item.metadata.related_topics = value
+        elif field == "references":
+            item.metadata.references = value
+        elif field == "language":
+            item.metadata.language = value
+        elif field == "tags":
+            item.metadata.tags = value
+
+def knowledge_tool(kb: Optional[KnowledgeBase] = None, max_results: int = 5) -> List[Tool]:
+    """Creates knowledge base tools.
+    
+    Args:
+        kb: The knowledge base instance.
+        max_results: Maximum number of results to return.
+    """
+    kb = kb or KnowledgeBase()
+    search_tools = KnowledgeSearchTool(kb=kb, max_results=max_results)
+    management_tools = KnowledgeManagementTool(kb=kb)
+    
+    return [
+        Tool(
+            search_tools.search,
+            name='knowledge_search',
+            description='Search knowledge base using full-text search'
+        ),
+        Tool(
+            search_tools.semantic_search,
+            name='knowledge_semantic_search', 
+            description='Find semantically similar knowledge using vector embeddings'
+        ),
+        Tool(
+            search_tools.query_by_metadata,
+            name='knowledge_query_by_metadata',
+            description='Search knowledge base by specific metadata field'
+        ),
+        Tool(
+            management_tools.upsert,
+            name='knowledge_upsert',
+            description='Add or update knowledge in the knowledge base'
+        ),
+        Tool(
+            management_tools.update_metadata,
+            name='knowledge_update_metadata',
+            description='Update specific metadata field for a knowledge item'
+        ),
+        Tool(
+            management_tools.batch_upsert,
+            name='knowledge_batch_upsert',
+            description='Batch upsert multiple knowledge items'
+        ),
+        Tool(
+            management_tools.batch_update_metadata,
+            name='knowledge_batch_update_metadata',
+            description='Batch update metadata for multiple knowledge items'
+        ),
+        Tool(
+            management_tools.get_metadata,
+            name='knowledge_get_metadata',
+            description='Get metadata for a specific knowledge item'
+        ),
+        Tool(
+            management_tools.add_reference,
+            name='knowledge_add_reference',
+            description='Add a reference to a knowledge item\'s metadata'
+        ),
+        Tool(
+            management_tools.add_topic,
+            name='knowledge_add_topic',
+            description='Add a topic to a knowledge item\'s metadata'
+        )
+    ]
+
+# Initialize tools with default knowledge base
+tools = knowledge_tool()

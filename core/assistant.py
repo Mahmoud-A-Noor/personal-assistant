@@ -1,9 +1,8 @@
 from typing import List, Optional
-from core.models import Message, MessageRole
+from models.conversation import Message, MessageRole
 from core.vector_db import VectorMemory
 from utils.embedding import LocalEmbedder
 from pydantic_ai import Agent, Tool
-from datetime import datetime
 
 class PersonalAssistant:
     def __init__(
@@ -27,27 +26,32 @@ class PersonalAssistant:
             system_prompt=self.system_prompt,
             tools=self.tools
         )
-    
-    def run_sync(self, user_input: str) -> str:
-        """Process user input and generate a response using tools and context"""
-        # Retrieve context from memory
-        related_messages = self.memory.retrieve_related_messages(user_input, num_results=5)
+
+    async def run(self, user_input: str) -> str:
+        """Process user input and generate a response asynchronously using tools and context"""
+        # # Retrieve context from memory
+        # related_messages = self.memory.retrieve_related_messages(user_input, num_results=3)
         
         # Generate response with tools and context
-        response = self.agent.run_sync(
+        result = await self.agent.run(
             user_prompt=user_input,
-            message_history=related_messages
-        ).data
+            message_history=self.conversation_history
+        )
         
+        # Extract the response content
+        response = result.data
         # Store interaction
-        self._store_interaction(user_input, response)
+        self._store_interaction(user_input, response, result)
+        
+        
         return response
     
-    def _store_interaction(self, user_input: str, response: str):
+    def _store_interaction(self, user_input: str, response: str, result):
         """Store the conversation interaction in memory"""
-        user_msg = Message(content=user_input, role=MessageRole.USER)
-        assistant_msg = Message(content=response, role=MessageRole.ASSISTANT)
+        # user_msg = Message(content=user_input, role=MessageRole.USER)
+        # assistant_msg = Message(content=response, role=MessageRole.ASSISTANT)
+        # self.memory.store_message(user_msg)
+        # self.memory.store_message(assistant_msg)
+        self.conversation_history.extend(result.all_messages())
         
-        self.memory.store_message(user_msg)
-        self.memory.store_message(assistant_msg)
-        self.conversation_history.extend([user_msg, assistant_msg])
+        

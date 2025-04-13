@@ -117,7 +117,7 @@ class EmailTool:
                     "read": False,  # Assume unread since we're not marking as read
                     "message_id": msg_id.decode()
                 })
-        return emails
+        return sorted(emails, key=lambda x: x['date'], reverse=True)
 
     def _mark_as_read(self, message_id: str) -> bool:
         """Sync implementation of mark_as_read."""

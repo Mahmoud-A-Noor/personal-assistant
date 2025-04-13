@@ -1,135 +1,190 @@
-from typing import List, Dict, Callable
+from typing import List, Dict, Optional, Callable
+from enum import Enum
+import re
+import tiktoken
 
-class TextChunker:
-    def __init__(
-        self,
-        max_tokens: int = 2000,
-        token_estimator: Callable[[str], int] = lambda x: len(x.split()),
-        overlap: int = 100,
-        separators: List[str] = None
-    ):
+class ChunkingStrategy(Enum):
+    """Supported chunking techniques optimized for RAG"""
+    FIXED_SIZE = "fixed_size"
+    SEMANTIC_PARAGRAPHS = "semantic_paragraphs"
+    RECURSIVE_CHARACTER = "recursive_character"
+    SENTENCE_AWARE = "sentence_aware"
+
+class SemanticChunker:
+    """
+    Advanced text chunking optimized for RAG pipelines with multiple strategies.
+    
+    Features:
+    - Multiple chunking techniques optimized for semantic retrieval
+    - Token-aware splitting
+    - Context preservation with overlaps
+    - Strategy-specific optimizations
+    """
+    
+    def __init__(self, 
+                strategy: ChunkingStrategy = ChunkingStrategy.SEMANTIC_PARAGRAPHS,
+                chunk_size: int = 1000,
+                overlap: int = 100,
+                model_name: str = "gpt-4"):
         """
-        Initialize the MessageChunker with configuration.
+        Initialize chunker with specified strategy.
         
         Args:
-            max_tokens: Maximum tokens allowed per chunk
-            token_estimator: Function to estimate token count from text
-            overlap: Number of tokens to overlap between chunks
-            separators: List of separators to split text on
+            strategy: Chunking technique to use
+            chunk_size: Target chunk size in tokens
+            overlap: Overlap between chunks in tokens
+            model_name: Model name for token counting
         """
-        self.max_tokens = max_tokens
-        self.token_estimator = token_estimator
+        self.strategy = strategy
+        self.chunk_size = chunk_size
         self.overlap = overlap
-        self.separators = separators or ["\n\n", "\n", ". ", " "]
-
+        self.tokenizer = tiktoken.encoding_for_model(model_name)
+        
+        # Strategy-specific configurations
+        self.separators = {
+            ChunkingStrategy.FIXED_SIZE: ["\n\n", "\n", " "],
+            ChunkingStrategy.SEMANTIC_PARAGRAPHS: ["\n\n", "\n", ". ", "? ", "! ", " "],
+            ChunkingStrategy.RECURSIVE_CHARACTER: ["\n\n", "\n", ". ", " ", ""],
+            ChunkingStrategy.SENTENCE_AWARE: [". ", "? ", "! ", "\n", " "]
+        }
+    
     def chunk_text(self, text: str) -> List[str]:
         """
-        Advanced text chunking with overlap and semantic boundaries
+        Split text into chunks using configured strategy.
+        Returns list of chunks preserving semantic boundaries.
         """
-        if not text:
-            return []
-            
+        if self.strategy == ChunkingStrategy.FIXED_SIZE:
+            return self._fixed_size_chunking(text)
+        elif self.strategy == ChunkingStrategy.SEMANTIC_PARAGRAPHS:
+            return self._semantic_paragraph_chunking(text)
+        elif self.strategy == ChunkingStrategy.RECURSIVE_CHARACTER:
+            return self._recursive_character_chunking(text)
+        elif self.strategy == ChunkingStrategy.SENTENCE_AWARE:
+            return self._sentence_aware_chunking(text)
+        else:
+            raise ValueError(f"Unsupported chunking strategy: {self.strategy}")
+    
+    def _fixed_size_chunking(self, text: str) -> List[str]:
+        """Fixed size chunks with simple token counting"""
+        tokens = self.tokenizer.encode(text)
         chunks = []
-        current_chunk = ""
-        current_tokens = 0
         
-        # Try all separators in order of priority
-        for sep in self.separators:
-            if sep in text:
-                sentences = text.split(sep)
-                for sentence in sentences:
-                    sentence_tokens = self.token_estimator(sentence)
-                    
-                    # If adding this would exceed limit (with overlap)
-                    if current_tokens + sentence_tokens > self.max_tokens - self.overlap:
-                        if current_chunk:
-                            chunks.append(current_chunk.strip())
-                            
-                            # Carry over overlap tokens
-                            overlap_part = " ".join(current_chunk.split()[-self.overlap:])
-                            current_chunk = overlap_part + " " + sentence
-                            current_tokens = self.token_estimator(overlap_part) + sentence_tokens + 1
-                        else:
-                            current_chunk = sentence
-                            current_tokens = sentence_tokens
-                    else:
-                        current_chunk += sep + sentence if current_chunk else sentence
-                        current_tokens += sentence_tokens
+        for i in range(0, len(tokens), self.chunk_size - self.overlap):
+            chunk_start = max(0, i - self.overlap)
+            chunk_end = i + self.chunk_size
+            chunk = self.tokenizer.decode(tokens[chunk_start:chunk_end])
+            chunks.append(chunk)
         
-        # Fallback if no separators found - split by max_tokens
-        if not chunks and not current_chunk:
-            words = text.split()
-            current_chunk = ""
-            current_tokens = 0
-            for word in words:
-                word_tokens = self.token_estimator(word)
-                if current_tokens + word_tokens > self.max_tokens:
-                    if current_chunk:
-                        chunks.append(current_chunk.strip())
-                        current_chunk = word
-                        current_tokens = word_tokens
-                else:
-                    current_chunk += " " + word if current_chunk else word
-                    current_tokens += word_tokens
-        
-        # Add final chunk if it exists
-        if current_chunk.strip():
-            chunks.append(current_chunk.strip())
-            
         return chunks
-
-    def chunk_and_embed(
-        self, 
-        text: str, 
-        embedder: Callable[[str], List[float]]
-    ) -> List[dict]:
-        """
-        Chunk text and generate embeddings in one operation
-        Returns list of dicts with keys: text, embedding
-        """
-        chunks = self.chunk_text(text)
-        return [
-            {
-                "text": chunk,
-                "embedding": embedder(chunk)
-            }
-            for chunk in chunks
-        ]
-
-    def chunk_messages(self, messages: List[Dict]) -> List[List[Dict]]:
-        """
-        Split messages into chunks that fit within token limits.
-        
-        Args:
-            messages: List of message dictionaries (must have "content" key)
-            
-        Returns:
-            List of message chunks where each chunk is within token limit
-        """
+    
+    def _semantic_paragraph_chunking(self, text: str) -> List[str]:
+        """Chunk while preserving paragraph and sentence boundaries"""
+        paragraphs = re.split(r"\n\n+", text)
         chunks = []
         current_chunk = []
-        current_tokens = 0
-
-        for msg in messages:
-            msg_tokens = self.token_estimator(msg["content"])
+        current_size = 0
+        
+        for para in paragraphs:
+            para_tokens = len(self.tokenizer.encode(para))
             
-            if current_tokens + msg_tokens > self.max_tokens and current_chunk:
-                chunks.append(current_chunk)
-                current_chunk = []
-                current_tokens = 0
+            if current_size + para_tokens > self.chunk_size and current_chunk:
+                chunks.append("\n\n".join(current_chunk))
                 
-            current_chunk.append(msg)
-            current_tokens += msg_tokens
-
-        if current_chunk:
-            chunks.append(current_chunk)
+                # Start new chunk with overlap
+                overlap_start = max(0, len(current_chunk) - self.overlap // 100)
+                current_chunk = current_chunk[overlap_start:]
+                current_size = sum(len(self.tokenizer.encode(p)) for p in current_chunk)
             
+            current_chunk.append(para)
+            current_size += para_tokens
+        
+        if current_chunk:
+            chunks.append("\n\n".join(current_chunk))
+        
         return chunks
-
-    def update_max_tokens(self, new_max: int):
-        """Update the maximum tokens per chunk"""
-        self.max_tokens = new_max
-
-    def update_token_estimator(self, new_estimator: Callable[[str], int]):
-        """Update the token estimation function"""
-        self.token_estimator = new_estimator
+    
+    def _recursive_character_chunking(self, text: str) -> List[str]:
+        """Recursively split by characters until chunks are small enough"""
+        separators = self.separators[self.strategy]
+        
+        def recursive_split(t: str, s_idx: int = 0) -> List[str]:
+            if len(self.tokenizer.encode(t)) <= self.chunk_size:
+                return [t]
+                
+            if s_idx >= len(separators):
+                return self._fixed_size_chunking(t)
+                
+            sep = separators[s_idx]
+            splits = [s for s in t.split(sep) if s]
+            
+            if len(splits) == 1:
+                return recursive_split(t, s_idx + 1)
+                
+            results = []
+            current_chunk = ""
+            
+            for s in splits:
+                s_with_sep = s + (sep if sep != "" else "")
+                if len(self.tokenizer.encode(current_chunk + s_with_sep)) <= self.chunk_size:
+                    current_chunk += s_with_sep
+                else:
+                    if current_chunk:
+                        results.append(current_chunk)
+                    current_chunk = s_with_sep
+                    
+            if current_chunk:
+                results.append(current_chunk)
+                
+            return results
+        
+        return recursive_split(text)
+    
+    def _sentence_aware_chunking(self, text: str) -> List[str]:
+        """Chunk while preserving complete sentences"""
+        sentences = re.split(r"(?<=[.!?])\s+", text)
+        chunks = []
+        current_chunk = []
+        current_size = 0
+        
+        for sent in sentences:
+            sent_tokens = len(self.tokenizer.encode(sent))
+            
+            if current_size + sent_tokens > self.chunk_size and current_chunk:
+                chunks.append(" ".join(current_chunk))
+                
+                # Start new chunk with overlap
+                overlap_start = max(0, len(current_chunk) - self.overlap // 20)
+                current_chunk = current_chunk[overlap_start:]
+                current_size = sum(len(self.tokenizer.encode(s)) for s in current_chunk)
+            
+            current_chunk.append(sent)
+            current_size += sent_tokens
+        
+        if current_chunk:
+            chunks.append(" ".join(current_chunk))
+        
+        return chunks
+    
+    def get_strategy_info(self) -> Dict[str, str]:
+        """Get information about current strategy"""
+        descriptions = {
+            ChunkingStrategy.FIXED_SIZE: "Simple fixed-size chunks with token counting",
+            ChunkingStrategy.SEMANTIC_PARAGRAPHS: "Paragraph-aware chunks preserving document structure",
+            ChunkingStrategy.RECURSIVE_CHARACTER: "Recursive splitting by characters for optimal boundaries",
+            ChunkingStrategy.SENTENCE_AWARE: "Sentence-aware chunks for better semantic coherence"
+        }
+        return {
+            "strategy": self.strategy.value,
+            "description": descriptions[self.strategy],
+            "optimal_use_case": self._get_optimal_use_case()
+        }
+    
+    def _get_optimal_use_case(self) -> str:
+        """Get recommended use case for current strategy"""
+        use_cases = {
+            ChunkingStrategy.FIXED_SIZE: "General purpose, code, or unstructured text",
+            ChunkingStrategy.SEMANTIC_PARAGRAPHS: "Long-form content, articles, documents",
+            ChunkingStrategy.RECURSIVE_CHARACTER: "Mixed content with varying structure",
+            ChunkingStrategy.SENTENCE_AWARE: "NLP tasks requiring complete sentences"
+        }
+        return use_cases[self.strategy]

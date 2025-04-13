@@ -1,61 +1,50 @@
+import os
 from dotenv import load_dotenv
-load_dotenv()
 
 from core.assistant import PersonalAssistant
-from core.knowledge import KnowledgeBase
-from tools.knowledge_tool import knowledge_tool
-from utils.embedding import LocalEmbedder
+from tools.email import tools as email_tools, EmailTool
 
-# Initialize components
-embedder = LocalEmbedder()
-knowledge_base = KnowledgeBase(embedder=embedder)
+# Load environment variables
+load_dotenv()
 
-# Get all knowledge tools
-tools = knowledge_tool(kb=knowledge_base, max_results=5)
-
-# Create assistant with knowledge tools
+# Create assistant with email tools
 personal_assistant = PersonalAssistant(
     model='google-gla:gemini-2.0-flash',
-      system_prompt="""
-         You are Noori - a smart personal assistant focused on knowledge management. Key rules:
+    system_prompt="""
+      You are Noori - a smart personal assistant focused on email management.
 
-         1. Knowledge Handling:
-         - Automatically save valuable information using knowledge_upsert
-         - Generate complete metadata without asking user:
-         * Importance: Default 3 (neutral), increase for critical info
-         * Language: Auto-detect (default 'en')
-         * Topics: Extract from content automatically
-         * Source: 'manual' for direct user input
-         - Never ask for metadata - infer everything from context
+      you have access to the following tools:
+      - email_send: Send an email to the specified recipient
+      - email_read: Read emails from the inbox
+      - email_mark_read: Mark an email as read
 
-         2. Responses:
-         - Be concise but helpful
-         - When sharing knowledge, include key metadata
-         - Only ask questions if absolutely necessary
-
-         3. Operations:
-         - Use knowledge_search before answering
-         - Update existing knowledge with better info
-         - Maintain clean metadata automatically
-      """,
-    embedder=embedder,
-    tools=tools
+      Responses:
+      - Be concise but helpful
+      - handle errors gracefully
+      - Only ask questions if absolutely necessary
+   """,
+    tools=email_tools
 )
+
+et = EmailTool()
 
 # Main interaction loop
 async def main():
-   print("Noori Assistant initialized. Type 'exit' to quit.")
-   while True:
-      user_prompt = input("\nYou: ")
-      if user_prompt.lower() in ['exit', 'quit']:
-         break
-         
-      try:
-         result = await personal_assistant.run(user_prompt)
-         print(f"\nNoori: {result}")
-      except Exception as e:
-         print(f"\nError: {str(e)}")
-         
+    print("Noori Email Assistant initialized. Type 'exit' to quit.")
+    while True:
+        user_prompt = input("\nYou: ")
+        if user_prompt.lower() in ['exit', 'quit']:
+            break
+            
+        try:
+            result = await personal_assistant.run(user_prompt)
+            if not result:  # Handle empty responses
+                print("\nNoori: Your inbox is empty")
+            else:
+                print(f"\nNoori: {result}")
+        except Exception as e:
+            print(f"\nNoori: I encountered an error - {str(e)}")
+            
 if __name__ == "__main__":
-   import asyncio
-   asyncio.run(main())
+    import asyncio
+    asyncio.run(main())

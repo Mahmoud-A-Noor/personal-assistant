@@ -1,13 +1,20 @@
-import os
 from dotenv import load_dotenv
 
 from core.assistant import PersonalAssistant
 from tools.email import get_email_tools
+from tools.transcribe import get_transcribe_tools
+from tools.knowledge import get_knowledge_tools
 
 # Load environment variables
 load_dotenv()
 
-# Initialize assistant with both email and knowledge tools
+# Initialize all tools
+tools = []
+tools.extend(get_email_tools())
+tools.extend(get_transcribe_tools())
+tools.extend(get_knowledge_tools())
+
+# Initialize assistant with all tools
 personal_assistant = PersonalAssistant(
     model="google-gla:gemini-2.0-flash",
     system_prompt="""
@@ -17,13 +24,14 @@ personal_assistant = PersonalAssistant(
       - email_send: Send an email to the specified recipient
       - email_read: Read emails from the inbox
       - email_mark_read: Mark an email as read
+      - transcribe: Transcribe audio from file path, YouTube URL, or bytes
 
       Responses:
       - Be concise but helpful
       - handle errors gracefully
       - Only ask questions if absolutely necessary
    """,
-    tools=get_email_tools()
+    tools=tools
 )
 
 # Main interaction loop

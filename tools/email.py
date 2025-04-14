@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional
+from typing import List
 import anyio
 import functools
 from pydantic_ai import Tool
@@ -174,6 +174,3 @@ def get_email_tools() -> List[Tool]:
             description="Mark an inbox email as read"
         )
     ]
-
-# Initialize email tools
-tools = get_email_tools()

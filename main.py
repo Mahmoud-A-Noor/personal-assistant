@@ -32,8 +32,7 @@ personal_assistant = PersonalAssistant(
       - knowledge_search: Search for similar knowledge in the knowledge base
       - knowledge_remove: Remove knowledge from the knowledge base by ID
       - calendar_get_events: Get upcoming events from the primary calendar
-      - calendar_create_event: Create a new calendar event
-      - calendar_update_event: Update an existing calendar event
+      - calendar_get_past_events: Get past events from the primary calendar
 
       Responses:
       - Be concise but helpful

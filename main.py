@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+import logging
 
 from core.assistant import PersonalAssistant
 from tools.email import get_email_tools
@@ -33,14 +34,17 @@ personal_assistant = PersonalAssistant(
       - knowledge_remove: Remove knowledge from the knowledge base by ID
       - calendar_get_events: Get upcoming events from the primary calendar
       - calendar_get_past_events: Get past events from the primary calendar
+      - calendar_create_event_with_conflict_check: Create event with time conflict checking. Returns either created event details or conflict information
 
       Responses:
       - Be concise but helpful
-      - handle errors gracefully
+      - handle errors gracefully    
       - Only ask questions if absolutely necessary
    """,
     tools=tools
 )
+
+logger = logging.getLogger(__name__)
 
 # Main interaction loop
 async def main():
@@ -54,10 +58,25 @@ async def main():
             result = await personal_assistant.run(user_prompt)
             if not result:  # Handle empty responses
                 print("\nNoori: Your inbox is empty")
+            elif isinstance(result, dict) and 'status' in result:
+                # Handle structured responses from tools
+                if result['status'] == 'conflict':
+                    print(f"\nNoori: {result['message']}")
+                    print("Conflicting events:")
+                    for event in result['conflicts']:
+                        print(f"- {event['summary']} from {event['start']} to {event['end']}")
+                    print(f"\nYour event: {result['proposed_event']['summary']} from {result['proposed_event']['start']} to {result['proposed_event']['end']}")
+                elif result['status'] == 'error':
+                    print(f"\nNoori: {result['message']}")
+                    if 'suggestion' in result:
+                        print(f"Suggestion: {result['suggestion']}")
+                else:
+                    print(f"\nNoori: {result}")
             else:
                 print(f"\nNoori: {result}")
         except Exception as e:
             print(f"\nNoori: I encountered an error - {str(e)}")
+            logger.exception("Error in main loop")
             
 if __name__ == "__main__":
     import asyncio

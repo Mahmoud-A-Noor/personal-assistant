@@ -8,7 +8,6 @@ from fastembed import (
     TextCrossEncoder
 )
 from enum import Enum
-import numpy as np
 
 class EmbeddingModel(Enum):
     """Supported embedding models"""
@@ -75,7 +74,26 @@ class QdrantFastEmbedder:
                 EmbeddingModel.MPNET: 30000,
                 EmbeddingModel.BGE_SMALL: 30000
             },
-            # Add dimensions for other techniques
+            EmbeddingTechnique.LATE_INTERACTION: {
+                EmbeddingModel.MINILM: 384,
+                EmbeddingModel.MPNET: 768,
+                EmbeddingModel.BGE_SMALL: 384
+            },
+            EmbeddingTechnique.IMAGE: {
+                EmbeddingModel.MINILM: 384,
+                EmbeddingModel.MPNET: 768,
+                EmbeddingModel.BGE_SMALL: 384
+            },
+            EmbeddingTechnique.MULTIMODAL: {
+                EmbeddingModel.MINILM: 384,
+                EmbeddingModel.MPNET: 768,
+                EmbeddingModel.BGE_SMALL: 384
+            },
+            EmbeddingTechnique.CROSS_ENCODER: {
+                EmbeddingModel.MINILM: 384,
+                EmbeddingModel.MPNET: 768,
+                EmbeddingModel.BGE_SMALL: 384
+            }
         }
         return dimensions.get(technique, {}).get(model, 768)  # Default dimension
     
@@ -102,7 +120,7 @@ class QdrantFastEmbedder:
         ranked = sorted(zip(range(len(documents)), scores), key=lambda x: x[1], reverse=True)
         return ranked[:top_k] if top_k else ranked
     
-    def get_technique_info(self) -> Dict[str, Any]:
+    def get_info(self) -> Dict[str, Any]:
         """Get information about current technique"""
         return {
             "technique": self.technique.value,

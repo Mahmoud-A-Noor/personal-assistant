@@ -4,6 +4,8 @@ from core.assistant import PersonalAssistant
 from tools.email import get_email_tools
 from tools.transcribe import get_transcribe_tools
 from tools.knowledge import get_knowledge_tools
+from tools.calendar import get_calendar_tools
+
 
 # Load environment variables
 load_dotenv()
@@ -13,6 +15,7 @@ tools = []
 tools.extend(get_email_tools())
 tools.extend(get_transcribe_tools())
 tools.extend(get_knowledge_tools())
+tools.extend(get_calendar_tools())
 
 # Initialize assistant with all tools
 personal_assistant = PersonalAssistant(
@@ -28,6 +31,9 @@ personal_assistant = PersonalAssistant(
       - knowledge_upsert: Add or update knowledge in the knowledge base even tho they are subjective opinions
       - knowledge_search: Search for similar knowledge in the knowledge base
       - knowledge_remove: Remove knowledge from the knowledge base by ID
+      - calendar_get_events: Get upcoming events from the primary calendar
+      - calendar_create_event: Create a new calendar event
+      - calendar_update_event: Update an existing calendar event
 
       Responses:
       - Be concise but helpful

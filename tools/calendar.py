@@ -142,150 +142,6 @@ class CalendarTool:
         """Initialize and return the calendar service."""
         return build('calendar', 'v3', credentials=self.credentials)
 
-    def _get_date_formats(self):
-        """Return list of supported date formats"""
-        return [
-            '%Y-%m-%d',      # 2025-04-16
-            '%d/%m/%Y',      # 16/04/2025
-            '%m/%d/%Y',      # 04/16/2025
-            '%B %d',         # April 16
-            '%b %d',         # Apr 16
-            '%d %B',         # 16 April
-            '%d %b',         # 16 Apr
-            '%B %d, %Y',     # April 16, 2025
-            '%d %B %Y',      # 16 April 2025
-        ]
-        
-    def _try_parse_date(self, date_str: str, fmt: str, now: datetime) -> Optional[datetime]:
-        """Try to parse a date string with given format"""
-        # Add current year if not in format
-        if '%Y' not in fmt:
-            date_to_parse = f"{date_str} {now.year}"
-            fmt = f"{fmt} %Y"
-        else:
-            date_to_parse = date_str
-            
-        date_part = datetime.strptime(date_to_parse, fmt)
-        return now.replace(
-            year=date_part.year,
-            month=date_part.month,
-            day=date_part.day
-        )
-    
-    def _parse_time(self, time_str: str, parsed_date: datetime) -> datetime:
-        """Parse time string and apply to date"""
-        try:
-            # Handle formats like "2PM", "2:30PM", "14:00", "14:30"
-            am_pm_pattern = re.compile(r'(\d{1,2})(?::(\d{2}))?(?:\s*([AaPp][Mm]))?')
-            match = am_pm_pattern.match(time_str.strip())
-            
-            if match:
-                hour, minute, am_pm = match.groups()
-                hour = int(hour)
-                minute = int(minute) if minute else 0
-                
-                # Adjust for 12-hour format with AM/PM
-                if am_pm and am_pm.lower() == 'pm' and hour < 12:
-                    hour += 12
-                elif am_pm and am_pm.lower() == 'am' and hour == 12:
-                    hour = 0
-                    
-                # Validate time
-                if not (0 <= hour <= 23 and 0 <= minute <= 59):
-                    raise ValueError(f"Invalid time: {time_str}")
-                    
-                return parsed_date.replace(hour=hour, minute=minute, second=0)
-            
-            # Try with 24-hour format
-            for fmt in ['%H:%M', '%H%M']:
-                try:
-                    time_part = datetime.strptime(time_str, fmt)
-                    return parsed_date.replace(
-                        hour=time_part.hour,
-                        minute=time_part.minute,
-                        second=0
-                    )
-                except ValueError:
-                    continue
-                    
-            raise ValueError(f"Could not parse time: {time_str}")
-        except Exception as e:
-            logger.error(f"Error parsing time: {str(e)}")
-            raise ValueError(f"Could not understand the time: {time_str}")
-        
-    def get_event_details(self, calendar_id: str, event_id: str) -> dict:
-        """
-        Get detailed information about a specific calendar event.
-        
-        Args:
-            calendar_id: Calendar ID (use 'primary' for primary calendar)
-            event_id: Event ID to retrieve
-            
-        Returns:
-            Event details dictionary
-        """
-        return self._get_service().events().get(
-            calendarId=calendar_id,
-            eventId=event_id
-        ).execute()
-
-    def get_conflicting_event_details(self, calendar_id: str, start: datetime, end: datetime) -> list:
-        """
-        Get details of events that conflict with a given time range.
-        
-        Args:
-            calendar_id: Calendar ID (use 'primary' for primary calendar)
-            start: Start datetime 
-            end: End datetime
-            
-        Returns:
-            List of conflicting event details
-        """
-        # Ensure timezone awareness
-        if start.tzinfo is None:
-            start = start.astimezone(self.local_tz)
-        if end.tzinfo is None:
-            end = end.astimezone(self.local_tz)
-            
-        # Convert to RFC3339 format
-        start_rfc = start.isoformat()
-        end_rfc = end.isoformat()
-        
-        # Check for conflicts using freebusy
-        freebusy = self._get_service().freebusy().query(body={
-            'timeMin': start_rfc,
-            'timeMax': end_rfc,
-            'items': [{'id': calendar_id}]
-        }).execute()
-        
-        conflicts = freebusy['calendars'][calendar_id].get('busy', [])
-        if not conflicts:
-            return []
-            
-        # Get the actual events in this time range to provide more details
-        events_result = self._get_service().events().list(
-            calendarId=calendar_id,
-            timeMin=start_rfc,
-            timeMax=end_rfc,
-            singleEvents=True,
-            orderBy='startTime'
-        ).execute()
-        
-        events = events_result.get('items', [])
-        
-        # Format conflict information
-        conflict_details = []
-        for event in events:
-            conflict_details.append({
-                'id': event.get('id'),
-                'summary': event.get('summary', 'Untitled Event'),
-                'start': event.get('start', {}).get('dateTime'),
-                'end': event.get('end', {}).get('dateTime'),
-                'description': event.get('description', '')
-            })
-            
-        return conflict_details
-
     def get_today(self) -> str:
         """Get today's date in local timezone."""
         return datetime.now(self.local_tz).strftime('%Y-%m-%d')
@@ -424,6 +280,119 @@ class CalendarTool:
                 'message': f"Failed to create event: {str(e)}"
             }
 
+    def update_event(self, calendar_id: str, event_id: str, 
+                   new_start_hour: int = None, new_start_minute: int = None,
+                   new_end_hour: int = None, new_end_minute: int = None,
+                   days_from_today: int = None, 
+                   new_summary: str = None, new_description: str = None) -> dict:
+        """
+        Flexible event updater that handles partial updates.
+        Only updates specified fields while preserving others.
+        """
+        try:
+            # Get current event
+            current_event = self._get_service().events().get(
+                calendarId=calendar_id,
+                eventId=event_id
+            ).execute()
+            
+            # Parse current times
+            current_start = datetime.fromisoformat(current_event['start']['dateTime'])
+            current_end = datetime.fromisoformat(current_event['end']['dateTime'])
+            duration = current_end - current_start
+            
+            # Calculate new times
+            new_start = current_start
+            new_end = current_end
+            
+            # Handle date change if specified
+            if days_from_today is not None:
+                today = datetime.now(self.local_tz).replace(hour=0, minute=0, second=0)
+                new_date = today + timedelta(days=days_from_today)
+                new_start = new_date.replace(hour=new_start.hour, minute=new_start.minute)
+                new_end = new_date.replace(hour=new_end.hour, minute=new_end.minute)
+            
+            # Apply partial time updates
+            if new_start_hour is not None or new_start_minute is not None:
+                new_start = new_start.replace(
+                    hour=new_start_hour if new_start_hour is not None else new_start.hour,
+                    minute=new_start_minute if new_start_minute is not None else new_start.minute
+                )
+                # Preserve duration if only start time changed
+                if new_end_hour is None and new_end_minute is None:
+                    new_end = new_start + duration
+            
+            if new_end_hour is not None or new_end_minute is not None:
+                new_end = new_end.replace(
+                    hour=new_end_hour if new_end_hour is not None else new_end.hour,
+                    minute=new_end_minute if new_end_minute is not None else new_end.minute
+                )
+            
+            # Verify end time is after start time
+            if new_end <= new_start:
+                return {
+                    'status': 'error',
+                    'message': 'End time must be after start time',
+                    'proposed_times': {
+                        'start': new_start.strftime('%I:%M %p'),
+                        'end': new_end.strftime('%I:%M %p')
+                    }
+                }
+            
+            # Prepare update with all fields (preserving existing ones)
+            updated_event = {
+                'summary': new_summary if new_summary is not None else current_event.get('summary', ''),
+                'description': new_description if new_description is not None else current_event.get('description', ''),
+                'location': current_event.get('location', '')
+            }
+            
+            # Only include time fields if they changed
+            if new_start != current_start or new_end != current_end:
+                updated_event.update({
+                    'start': {
+                        'dateTime': new_start.astimezone(self.local_tz).isoformat(),
+                        'timeZone': 'UTC'
+                    },
+                    'end': {
+                        'dateTime': new_end.astimezone(self.local_tz).isoformat(),
+                        'timeZone': 'UTC'
+                    }
+                })
+            
+            # Skip update if nothing changed
+            if not updated_event:
+                return {
+                    'status': 'no_change',
+                    'message': 'No updates were specified',
+                    'current_event': current_event
+                }
+            
+            # Perform update
+            updated_event = self._get_service().events().update(
+                calendarId=calendar_id,
+                eventId=event_id,
+                body=updated_event
+            ).execute()
+            
+            return {
+                'status': 'success',
+                'message': 'Event updated successfully',
+                'changes': {
+                    'summary': 'updated' if new_summary else 'not modified',
+                    'description': 'updated' if new_description else 'not modified',
+                    'start': new_start.strftime('%I:%M %p') if new_start != current_start else 'not modified',
+                    'end': new_end.strftime('%I:%M %p') if new_end != current_end else 'not modified',
+                    'date': new_start.strftime('%A, %B %d') if days_from_today is not None else 'not modified'
+                },
+                'event': updated_event
+            }
+            
+        except Exception as e:
+            return {
+                'status': 'error',
+                'message': f'Failed to update event: {str(e)}'
+            }
+
 def get_calendar_tools() -> List[Tool]:
     """Creates calendar management tools."""
     calendar_client = CalendarTool()
@@ -452,6 +421,6 @@ def get_calendar_tools() -> List[Tool]:
         Tool(
             calendar_client.update_event,
             name="calendar_update_event",
-            description="Update an existing calendar event. Args: calendar_id, event_id, summary, start, end, description"
+            description="Update an existing calendar event with simple time parameters. Args: calendar_id, event_id, new_start_hour=None, new_start_minute=None, new_end_hour=None, new_end_minute=None, days_from_today=None, new_summary=None, new_description=None"
         )
     ]

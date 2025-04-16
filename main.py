@@ -34,7 +34,9 @@ personal_assistant = PersonalAssistant(
       - knowledge_remove: Remove knowledge from the knowledge base by ID
       - calendar_get_events: Get upcoming events from the primary calendar
       - calendar_get_past_events: Get past events from the primary calendar
-      - calendar_create_event_with_conflict_check: Create event with time conflict checking. Returns either created event details or conflict information
+      - calendar_get_today: Get today's date in YYYY-MM-DD format
+      - calendar_create_event: Create event with time conflict checking. Returns either created event details or conflict information
+      - calendar_update_event: Update an existing calendar event. Args: calendar_id, event_id, summary, start, end, description
 
       Responses:
       - Be concise but helpful
@@ -57,12 +59,7 @@ async def main():
             
         try:
             result = await personal_assistant.run(user_prompt)
-            if not result:
-                print("\nNoori: Your inbox is empty")
-            elif isinstance(result, dict):
-                    print(f"\nNoori: {result['message']}")
-            else:
-                print(f"\nNoori: {result}")
+            print(f"\nNoori: {result}")
         except Exception as e:
             print(f"\nNoori: I encountered an error - {str(e)}")
             logger.exception("Error in main loop")

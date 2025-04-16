@@ -40,6 +40,7 @@ personal_assistant = PersonalAssistant(
       - Be concise but helpful
       - handle errors gracefully    
       - Only ask questions if absolutely necessary
+      - output should always be organized and formatted
    """,
     tools=tools
 )
@@ -56,22 +57,10 @@ async def main():
             
         try:
             result = await personal_assistant.run(user_prompt)
-            if not result:  # Handle empty responses
+            if not result:
                 print("\nNoori: Your inbox is empty")
-            elif isinstance(result, dict) and 'status' in result:
-                # Handle structured responses from tools
-                if result['status'] == 'conflict':
+            elif isinstance(result, dict):
                     print(f"\nNoori: {result['message']}")
-                    print("Conflicting events:")
-                    for event in result['conflicts']:
-                        print(f"- {event['summary']} from {event['start']} to {event['end']}")
-                    print(f"\nYour event: {result['proposed_event']['summary']} from {result['proposed_event']['start']} to {result['proposed_event']['end']}")
-                elif result['status'] == 'error':
-                    print(f"\nNoori: {result['message']}")
-                    if 'suggestion' in result:
-                        print(f"Suggestion: {result['suggestion']}")
-                else:
-                    print(f"\nNoori: {result}")
             else:
                 print(f"\nNoori: {result}")
         except Exception as e:

@@ -2,7 +2,7 @@
 Google Calendar operations tool for the personal assistant.
 """
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from typing import List, Optional, Tuple, Union
 import anyio
 import functools
@@ -14,6 +14,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from dotenv import load_dotenv
+import tzlocal  # For detecting system timezone
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +29,10 @@ class CalendarTool:
     
     def __init__(self):
         load_dotenv()
-        """Initialize with OAuth2 credentials."""
         self.credentials = None
         self._setup_credentials()
-
+        self.local_tz = tzlocal.get_localzone()  # Get system timezone
+        
     def _setup_credentials(self):
         """Set up OAuth2 credentials."""
         # The file token.json stores the user's access and refresh tokens
@@ -84,7 +85,7 @@ class CalendarTool:
     def _get_upcoming_events(self, max_results: int) -> List[dict]:
         """Sync implementation for getting upcoming events."""
         service = self._get_service()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(self.local_tz).isoformat()
         
         events_result = service.events().list(
             calendarId='primary',
@@ -98,6 +99,7 @@ class CalendarTool:
         
         return [
             {
+                'id': event['id'],
                 'summary': event.get('summary', 'No title'),
                 'start': event['start'].get('dateTime', event['start'].get('date')),
                 'end': event['end'].get('dateTime', event['end'].get('date'))
@@ -107,15 +109,14 @@ class CalendarTool:
 
     def _get_past_events(self, max_results: int, days: Optional[int]) -> List[dict]:
         """Sync implementation for getting past events."""
-        from datetime import datetime, timedelta, timezone
         
         service = self._get_service()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(self.local_tz).isoformat()
         
         # Calculate timeMin if days parameter is provided
         time_min = None
         if days is not None:
-            time_min = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            time_min = (datetime.now(self.local_tz) - timedelta(days=days)).isoformat()
         
         events_result = service.events().list(
             calendarId='primary',
@@ -141,52 +142,6 @@ class CalendarTool:
         """Initialize and return the calendar service."""
         return build('calendar', 'v3', credentials=self.credentials)
 
-    def _parse_datetime(self, date_str: str, time_str: str = None) -> datetime:
-        """
-        Parse date and time strings into a datetime object.
-        Handles various formats and ensures timezone awareness.
-        """
-        try:
-            now = datetime.now().replace(microsecond=0)
-            parsed_date = None
-            
-            # Handle relative dates
-            if date_str.lower() == 'today':
-                parsed_date = now
-            elif date_str.lower() == 'tomorrow':
-                parsed_date = now + timedelta(days=1)
-            elif date_str.lower() == 'yesterday':
-                parsed_date = now - timedelta(days=1)
-            else:
-                # Try different date formats
-                for fmt in self._get_date_formats():
-                    try:
-                        date_part = self._try_parse_date(date_str, fmt, now)
-                        if date_part:
-                            parsed_date = date_part
-                            break
-                    except ValueError:
-                        continue
-                
-            if parsed_date is None:
-                raise ValueError(f"Could not parse date: {date_str}")
-                
-            # Parse time if provided
-            if time_str:
-                parsed_date = self._parse_time(time_str, parsed_date)
-            else:
-                parsed_date = parsed_date.replace(hour=0, minute=0, second=0)
-                
-            # Ensure timezone awareness
-            if parsed_date.tzinfo is None:
-                parsed_date = parsed_date.astimezone(timezone.utc)
-                
-            return parsed_date
-            
-        except Exception as e:
-            logger.error(f"Error parsing datetime: {str(e)}")
-            raise ValueError(f"Could not understand the date/time: {date_str} {time_str}")
-    
     def _get_date_formats(self):
         """Return list of supported date formats"""
         return [
@@ -258,236 +213,6 @@ class CalendarTool:
             logger.error(f"Error parsing time: {str(e)}")
             raise ValueError(f"Could not understand the time: {time_str}")
         
-    def _parse_event_time(self, date_str: str, start_time: str, end_time: str = None, duration_minutes: int = None) -> Tuple[datetime, datetime]:
-        """
-        Parse event start and end times.
-        
-        Args:
-            date_str: Date string
-            start_time: Start time string
-            end_time: End time string (optional if duration_minutes is provided)
-            duration_minutes: Duration in minutes (optional if end_time is provided)
-            
-        Returns:
-            Tuple of (start_datetime, end_datetime)
-        """
-        start_dt = self._parse_datetime(date_str, start_time)
-        
-        # If end_time provided, use it
-        if end_time:
-            end_dt = self._parse_datetime(date_str, end_time)
-            # If end time is before start time, assume it's the next day
-            if end_dt < start_dt:
-                end_dt = end_dt + timedelta(days=1)
-        # Otherwise use duration
-        elif duration_minutes:
-            end_dt = start_dt + timedelta(minutes=duration_minutes)
-        # Default to 1 hour
-        else:
-            end_dt = start_dt + timedelta(hours=1)
-            
-        return start_dt, end_dt
-
-    def create_event(self, calendar_id: str, summary: str, start: Union[datetime, str], end: Union[datetime, str] = None, 
-                       description: str = None, date: str = None, start_time: str = None, end_time: str = None, 
-                       duration_minutes: int = None) -> dict:
-        """
-        Create a new calendar event.
-        
-        Args:
-            calendar_id: Calendar ID (use 'primary' for primary calendar)
-            summary: Event title/summary
-            start: Start datetime (if datetime object)
-            end: End datetime (if datetime object)
-            description: Event description
-            date: Date string (if start is not a datetime)
-            start_time: Start time string (if start is not a datetime)
-            end_time: End time string (if end is not a datetime)
-            duration_minutes: Duration in minutes (alternative to end_time)
-            
-        Returns:
-            Created event details
-        """
-        # Parse datetime inputs if needed
-        if isinstance(start, datetime):
-            start_dt = start
-            end_dt = end if isinstance(end, datetime) else start + timedelta(hours=1)
-        else:
-            # Use provided date or start as date
-            event_date = date or start
-            event_start_time = start_time or start
-            start_dt, end_dt = self._parse_event_time(event_date, event_start_time, end_time, duration_minutes)
-            
-        # Ensure timezone awareness
-        if start_dt.tzinfo is None:
-            start_dt = start_dt.astimezone(timezone.utc)
-        if end_dt.tzinfo is None:
-            end_dt = end_dt.astimezone(timezone.utc)
-            
-        event = {
-            'summary': summary,
-            'description': description,
-            'start': {
-                'dateTime': start_dt.isoformat(),
-                'timeZone': 'UTC'
-            },
-            'end': {
-                'dateTime': end_dt.isoformat(),
-                'timeZone': 'UTC'
-            }
-        }
-
-        return self._get_service().events().insert(
-            calendarId=calendar_id,
-            body=event
-        ).execute()
-
-    def create_event_with_conflict_check(self, calendar_id: str, summary: str, start: Union[datetime, str], end: Union[datetime, str] = None, 
-                       description: str = None, date: str = None, start_time: str = None, end_time: str = None, 
-                       duration_minutes: int = None) -> dict:
-        """
-        Create event with conflict checking. Returns created event or conflict details.
-        
-        Args:
-            calendar_id: Calendar ID (use 'primary' for primary calendar)
-            summary: Event title/summary
-            start: Start datetime (if datetime object)
-            end: End datetime (if datetime object)
-            description: Event description
-            date: Date string (if start is not a datetime)
-            start_time: Start time string (if start is not a datetime)
-            end_time: End time string (if end is not a datetime)
-            duration_minutes: Duration in minutes (alternative to end_time)
-            
-        Returns:
-            Created event details or conflict information
-        """
-        try:
-            # Parse datetime inputs if needed
-            if isinstance(start, datetime):
-                start_dt = start
-                end_dt = end if isinstance(end, datetime) else start + timedelta(hours=1)
-            else:
-                # Use provided date or start as date
-                event_date = date or start
-                event_start_time = start_time or start
-                start_dt, end_dt = self._parse_event_time(event_date, event_start_time, end_time, duration_minutes)
-                
-            # Get detailed conflict information
-            conflicting_events = self.get_conflicting_event_details(calendar_id, start_dt, end_dt)
-            
-            if conflicting_events:
-                return {
-                    'status': 'conflict',
-                    'message': f'Time conflict with {len(conflicting_events)} existing events',
-                    'conflicts': conflicting_events,
-                    'proposed_event': {
-                        'summary': summary,
-                        'start': start_dt.isoformat(),
-                        'end': end_dt.isoformat()
-                    }
-                }
-            
-            # No conflicts - create event
-            return self.create_event(calendar_id, summary, start_dt, end_dt, description)
-            
-        except Exception as e:
-            logger.error(f"Error creating event: {str(e)}")
-            return {
-                'status': 'error',
-                'message': str(e),
-                'suggestion': 'Please provide dates/times in formats like "tomorrow 2PM" or "2025-04-16 14:00"'
-            }
-
-    def update_event(self, calendar_id: str, event_id: str, summary: str = None, 
-                   start: Union[datetime, str] = None, end: Union[datetime, str] = None,
-                   description: str = None, date: str = None, start_time: str = None, 
-                   end_time: str = None, duration_minutes: int = None) -> dict:
-        """
-        Update an existing calendar event.
-        
-        Args:
-            calendar_id: Calendar ID (use 'primary' for primary calendar)
-            event_id: Event ID to update
-            summary: New event title/summary (optional)
-            start: New start datetime (if datetime object) (optional)
-            end: New end datetime (if datetime object) (optional)
-            description: New event description (optional)
-            date: New date string (if start is not a datetime) (optional)
-            start_time: New start time string (if start is not a datetime) (optional)
-            end_time: New end time string (if end is not a datetime) (optional)
-            duration_minutes: New duration in minutes (alternative to end_time) (optional)
-            
-        Returns:
-            Updated event details
-        """
-        # Get current event to update only provided fields
-        current_event = self._get_service().events().get(
-            calendarId=calendar_id,
-            eventId=event_id
-        ).execute()
-        
-        # Create updated event dict, starting with the current event
-        updated_event = {}
-        
-        # Update summary if provided
-        if summary:
-            updated_event['summary'] = summary
-        elif 'summary' in current_event:
-            updated_event['summary'] = current_event['summary']
-            
-        # Update description if provided
-        if description:
-            updated_event['description'] = description
-        elif 'description' in current_event:
-            updated_event['description'] = current_event['description']
-            
-        # Update start/end times if provided
-        start_dt = None
-        end_dt = None
-        
-        # Parse datetime inputs if needed
-        if isinstance(start, datetime):
-            start_dt = start
-        elif date and start_time:
-            start_dt = self._parse_datetime(date, start_time)
-            
-        if isinstance(end, datetime):
-            end_dt = end
-        elif date and end_time:
-            end_dt = self._parse_datetime(date, end_time)
-        elif start_dt and duration_minutes:
-            end_dt = start_dt + timedelta(minutes=duration_minutes)
-            
-        # Only update start/end if new values provided
-        if start_dt:
-            updated_event['start'] = {
-                'dateTime': start_dt.astimezone(timezone.utc).isoformat(),
-                'timeZone': 'UTC'
-            }
-        elif 'start' in current_event:
-            updated_event['start'] = current_event['start']
-            
-        if end_dt:
-            updated_event['end'] = {
-                'dateTime': end_dt.astimezone(timezone.utc).isoformat(),
-                'timeZone': 'UTC'
-            }
-        elif 'end' in current_event:
-            updated_event['end'] = current_event['end']
-            
-        # Update other properties from current event
-        for key, value in current_event.items():
-            if key not in updated_event and key not in ['etag', 'kind', 'status', 'htmlLink', 'created', 'updated', 'iCalUID', 'sequence']:
-                updated_event[key] = value
-                
-        # Perform the update
-        return self._get_service().events().update(
-            calendarId=calendar_id,
-            eventId=event_id,
-            body=updated_event
-        ).execute()
-
     def get_event_details(self, calendar_id: str, event_id: str) -> dict:
         """
         Get detailed information about a specific calendar event.
@@ -518,9 +243,9 @@ class CalendarTool:
         """
         # Ensure timezone awareness
         if start.tzinfo is None:
-            start = start.astimezone(timezone.utc)
+            start = start.astimezone(self.local_tz)
         if end.tzinfo is None:
-            end = end.astimezone(timezone.utc)
+            end = end.astimezone(self.local_tz)
             
         # Convert to RFC3339 format
         start_rfc = start.isoformat()
@@ -562,89 +287,141 @@ class CalendarTool:
         return conflict_details
 
     def get_today(self) -> str:
-        """
-        Get today's date in YYYY-MM-DD format.
-        Useful for the AI to know the current date reference point.
-        """
-        return datetime.now(timezone.utc).date().isoformat()
-
-    def create_event_simple(self, calendar_id: str, summary: str, 
+        """Get today's date in local timezone."""
+        return datetime.now(self.local_tz).strftime('%Y-%m-%d')
+        
+    def create_event(self, summary: str, 
                           start_hour: int, start_minute: int,
                           end_hour: int, end_minute: int,
                           days_from_today: int = 0,
-                          description: str = None) -> dict:
+                          description: str = None,
+                          calendar_id: str = 'primary',
+                          force_create: bool = False) -> dict:
         """
-        Simplified event creation with conflict checking.
-        
-        Args:
-            calendar_id: Calendar ID ('primary' for main calendar)
-            summary: Event title
-            start_hour: Start hour (24-hour format)
-            start_minute: Start minute (0-59)
-            end_hour: End hour (24-hour format)
-            end_minute: End minute (0-59)
-            days_from_today: Days from today (0=today, 1=tomorrow)
-            description: Optional event description
-            
-        Returns:
-            Created event details or conflict information
+        Create event with enhanced conflict checking.
+        Set force_create=True to schedule despite conflicts.
         """
         try:
-            # Calculate start and end datetimes
-            today = datetime.now(timezone.utc).replace(
+            # Validate calendar ID exists
+            try:
+                self._get_service().calendars().get(calendarId=calendar_id).execute()
+            except Exception:
+                return {
+                    'status': 'error',
+                    'message': f"Calendar ID '{calendar_id}' not found. Using 'primary' calendar instead.",
+                    'calendar_id': 'primary'
+                }
+            
+            # Create in local timezone
+            today = datetime.now(self.local_tz).replace(
                 hour=0, minute=0, second=0, microsecond=0
             )
             event_date = today + timedelta(days=days_from_today)
             
-            start_dt = event_date.replace(hour=start_hour, minute=start_minute)
-            end_dt = event_date.replace(hour=end_hour, minute=end_minute)
+            start_local = event_date.replace(hour=start_hour, minute=start_minute)
+            end_local = event_date.replace(hour=end_hour, minute=end_minute)
             
-            # Handle overnight events
-            if end_dt < start_dt:
-                end_dt += timedelta(days=1)
+            if end_local < start_local:
+                end_local += timedelta(days=1)
+                
+            # Convert to UTC for Google
+            start_utc = start_local.astimezone(self.local_tz)
+            end_utc = end_local.astimezone(self.local_tz)
             
-            # Check for conflicts
+            # Enhanced conflict check with buffer time
+            time_min = (start_utc - timedelta(minutes=15)).isoformat()
+            time_max = (end_utc + timedelta(minutes=15)).isoformat()
+            
             freebusy = self._get_service().freebusy().query(body={
-                'timeMin': start_dt.isoformat(),
-                'timeMax': end_dt.isoformat(),
-                'items': [{'id': calendar_id}]
+                'timeMin': time_min,
+                'timeMax': time_max,
+                'items': [{'id': calendar_id}],
+                'timeZone': 'UTC'
             }).execute()
             
-            conflicts = freebusy['calendars'][calendar_id].get('busy', [])
-            if conflicts:
-                return {
-                    'status': 'conflict',
-                    'message': f'Time conflict with {len(conflicts)} existing events',
-                    'proposed_event': {
-                        'summary': summary,
-                        'start': start_dt.isoformat(),
-                        'end': end_dt.isoformat()
+            busy_periods = freebusy['calendars'][calendar_id].get('busy', [])
+            if busy_periods and not force_create:
+                # Get full event details for conflicts
+                conflicts = []
+                for period in busy_periods:
+                    events = self._get_service().events().list(
+                        calendarId=calendar_id,
+                        timeMin=period['start'],
+                        timeMax=period['end'],
+                        singleEvents=True
+                    ).execute().get('items', [])
+                    
+                    for event in events:
+                        event_start = datetime.fromisoformat(event['start']['dateTime'])
+                        event_end = datetime.fromisoformat(event['end']['dateTime'])
+                        
+                        # Check if events actually overlap (not just adjacent)
+                        if not (event_end <= start_utc or event_start >= end_utc):
+                            conflicts.append({
+                                'id': event['id'],
+                                'summary': event.get('summary', 'Busy'),
+                                'start': event_start.astimezone(self.local_tz).strftime('%I:%M %p'),
+                                'end': event_end.astimezone(self.local_tz).strftime('%I:%M %p'),
+                                'date': event_start.astimezone(self.local_tz).strftime('%A, %B %d')
+                            })
+                
+                if conflicts:
+                    conflict_msg = "Found scheduling conflicts:\n"
+                    for conflict in conflicts:
+                        conflict_msg += f"- {conflict['summary']} on {conflict['date']} from {conflict['start']} to {conflict['end']}\n"
+                    
+                    conflict_msg += f"\nYour event: {summary} on {start_local.strftime('%A, %B %d')} from {start_local.strftime('%I:%M %p')} to {end_local.strftime('%I:%M %p')}"
+                    if description:
+                        conflict_msg += f"\nLocation: {description}"
+                    
+                    return {
+                        'status': 'conflict',
+                        'message': conflict_msg,
+                        'conflicts': conflicts,
+                        'proposed_event': {
+                            'summary': summary,
+                            'date': start_local.strftime('%A, %B %d'),
+                            'start': start_local.strftime('%I:%M %p'),
+                            'end': end_local.strftime('%I:%M %p'),
+                            'location': description
+                        },
+                        'suggestion': "Would you like to schedule anyway? (yes/no)"
                     }
-                }
             
-            # Create the event if no conflicts
+            # Create the event (stored in UTC by Google)
             event = {
                 'summary': summary,
                 'description': description,
                 'start': {
-                    'dateTime': start_dt.isoformat(),
+                    'dateTime': start_utc.isoformat(),
                     'timeZone': 'UTC'
                 },
                 'end': {
-                    'dateTime': end_dt.isoformat(),
+                    'dateTime': end_utc.isoformat(),
                     'timeZone': 'UTC'
                 }
             }
             
-            return self._get_service().events().insert(
+            created_event = self._get_service().events().insert(
                 calendarId=calendar_id,
                 body=event
             ).execute()
             
+            # Convert back to local time for response
+            created_event['start']['localTime'] = start_local.isoformat()
+            created_event['end']['localTime'] = end_local.isoformat()
+            created_event['timezone'] = str(self.local_tz)
+            
+            return {
+                'status': 'success',
+                'message': f"Event '{summary}' scheduled for {start_local.strftime('%A, %B %d at %I:%M %p')}",
+                'details': created_event
+            }
+            
         except Exception as e:
             return {
                 'status': 'error',
-                'message': str(e)
+                'message': f"Failed to create event: {str(e)}"
             }
 
 def get_calendar_tools() -> List[Tool]:
@@ -668,8 +445,13 @@ def get_calendar_tools() -> List[Tool]:
             description="Get today's date in YYYY-MM-DD format"
         ),
         Tool(
-            calendar_client.create_event_simple,
+            calendar_client.create_event,
             name="calendar_create_event",
-            description="Create event with conflict checking. Args: calendar_id, summary, start_hour (24h), start_minute, end_hour (24h), end_minute, days_from_today (0=today), description"
+            description="Create event with conflict checking. Args: summary, start_hour (0-23), start_minute (0-59), end_hour (0-23), end_minute (0-59), days_from_today=0, description=None, calendar_id='primary', force_create=False"
+        ),
+        Tool(
+            calendar_client.update_event,
+            name="calendar_update_event",
+            description="Update an existing calendar event. Args: calendar_id, event_id, summary, start, end, description"
         )
     ]

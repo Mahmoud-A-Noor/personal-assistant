@@ -73,4 +73,4 @@ We welcome contributions! To get started:
 This project is licensed under the MIT License. See `LICENSE` for details.
 
 ## Contact
-For questions, suggestions, or support, please open an issue or contact the maintainer at [your_email@example.com].
+For questions, suggestions, or support, please open an issue or contact the maintainer at [mahmoudnoor917@gmail.com].

@@ -10,7 +10,7 @@ from tools.calendar import get_calendar_tools
 
 ##########################################################################################
 
-# TODO: make the agent able to run multiple tools in the request
+# TODO: make the agent able to run multiple tools or agents as required per request
 # Noori: You have 9 unread emails.
 # You: give me summary of them and mark them as read  
 # Noori: I have marked all the emails as read.

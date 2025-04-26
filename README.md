@@ -37,6 +37,7 @@ A professional, modular, and extensible personal assistant project designed to a
    ```bash
    pip install -r requirements.txt
    ```
+   *(```playwright install``` must be run after installing dependencies so agent can interact with the browser)
    *(If `requirements.txt` is missing, install dependencies manually as described in the codebase.)*
 
 ### Usage

@@ -115,7 +115,7 @@ class EmailTool:
                     "body": self._extract_email_body(email_message),
                     "date": self._parse_email_date(email_message['date']),
                     "read": False,  # Assume unread since we're not marking as read
-                    "message_id": msg_id.decode()
+                    "message_id": msg_id.decode() if isinstance(msg_id, bytes) else msg_id
                 })
         return sorted(emails, key=lambda x: x['date'], reverse=True)
 
@@ -133,8 +133,10 @@ class EmailTool:
             for part in msg.walk():
                 content_type = part.get_content_type()
                 if content_type == 'text/plain':
-                    return part.get_payload(decode=True).decode()
-        return msg.get_payload(decode=True).decode()
+                    payload = part.get_payload(decode=True)
+                    return payload.decode() if payload else ""
+        payload = msg.get_payload(decode=True)
+        return payload.decode() if payload else ""
 
     def _parse_email_date(self, date_str: str) -> datetime:
         """Parse the date string from an email message."""

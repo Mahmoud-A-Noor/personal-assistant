@@ -33,32 +33,31 @@ class PersonalAssistant:
         )
 
     async def run(self, user_input: str) -> str:
-        """Process user input and generate a response asynchronously using tools, agents, and context"""
-        # Always let the LLM decide if this should be delegated to an agent
-        result = await self.agent.run(
-            user_prompt=user_input,
-            message_history=self.conversation_history
-        )
-        response = result.output
-        self._store_interaction(result)
-
-        # Check for agent delegation instruction in the LLM output
-        if response.strip().lower().startswith("delegate_to:"):
-            lines = response.strip().splitlines()
-            agent_line = lines[0]
-            task_line = lines[1] if len(lines) > 1 else user_input
-            agent_name = agent_line.split(":", 1)[1].strip()
-            task = task_line.replace("task:", "").strip() if task_line.lower().startswith("task:") else user_input
-            if hasattr(self, 'agents') and agent_name in self.agents:
-                agent = self.agents[agent_name]
-                agent_result = await agent.run_task(task)
-                # Ask LLM to synthesize final answer
-                followup_result = await self.agent.run(
-                    user_prompt=agent_result,
-                    message_history=self.conversation_history
-                )
-                self._store_interaction(followup_result)
-                return followup_result.output
+        """
+        Implements system prompt logic:
+        - The LLM will decide if the task is simple or complex based on the system prompt.
+        - The LLM will delegate to planner_agent or handle directly as needed.
+        - The LLM will wrap the final response in <done> tags (success or failure).
+        - This method loops, feeding back intermediate results, until a <done> tag is found.
+        - The <done> tag is removed before returning the response to the user.
+        """
+        prompt = user_input
+        response = ""
+        max_turns = 10  # Prevent infinite loops
+        for _ in range(max_turns):
+            result = await self.agent.run(
+                user_prompt=prompt,
+                message_history=self.conversation_history
+            )
+            self._store_interaction(result)
+            response = result.output.strip()
+            # Check for <done> tag (case-insensitive)
+            if response.lower().startswith("<done>") and response.lower().endswith("</done>"):
+                # Remove <done> tags and return clean response
+                return response[6:-7].strip()
+            # Otherwise, feed back the last response as the new prompt
+            prompt = response
+        # Fallback: if <done> never found, return last response as-is
         return response
 
     def _store_interaction(self, result):

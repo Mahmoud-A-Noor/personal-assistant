@@ -50,15 +50,16 @@ class PlannerAgent:
             f"Objective: {objective}\n"
             f"Agents:\n" + "\n".join(f"- {name}: {doc}" for name, doc in agent_docs.items()) + "\n"
             f"Tools:\n" + "\n".join(f"- {name}: {doc}" for name, doc in tool_docs.items()) + "\n"
-            f"Return your plan as a sequence of <step> tags, one for each step, like <step>Do something</step>. "
+            "Return your plan as a sequence of <step-{number}> tags, one for each step, like <step-3>Do something</step-3>. "
             f"If the task is impossible or unclear, return <step>Unable to generate a plan for this objective.</step>"
         )
         result = await self.agent.run(user_prompt=prompt)
-        steps = re.findall(r'<step>(.*?)</step>', result.output, re.DOTALL)
-        steps = [step.strip() for step in steps if step.strip()]
-        if not steps:
-            return []
-        # Check for impossible indicator
-        if len(steps) == 1 and 'unable' in steps[0].lower():
-            return steps
-        return steps
+        return result
+        # steps = re.findall(r'<step-\d+>(.*?)</step-\d+>', result.output, re.DOTALL)
+        # steps = [step.strip() for step in steps if step.strip()]
+        # if not steps:
+        #     return []
+        # # Check for impossible indicator
+        # if len(steps) == 1 and 'unable' in steps[0].lower():
+        #     return steps
+        # return steps

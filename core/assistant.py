@@ -1,3 +1,4 @@
+import os
 from typing import List, Optional, Dict
 from pydantic_ai import Agent, Tool
 
@@ -5,17 +6,25 @@ class PersonalAssistant:
     def __init__(
         self,
         model: str,
-        system_prompt: str,
+        system_prompt: Optional[str] = None,
         tools: Optional[List[Tool]] = None,
-        agents: Optional[Dict[str, Agent]] = None
+        agents: Optional[Dict[str, Agent]] = None,
+        prompt_path: Optional[str] = None
     ):
         self.model = model
-        self.system_prompt = system_prompt
         self.tools = tools or []
         self.agents = agents or {}
-        
         self.conversation_history = []
-        
+
+        # Read system prompt from file if not provided directly
+        if system_prompt is not None:
+            self.system_prompt = system_prompt
+        else:
+            if prompt_path is None:
+                prompt_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "system_prompts", "assistant.txt")
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                self.system_prompt = f.read()
+
         # Initialize agent with tools
         self.agent = Agent(
             self.model,

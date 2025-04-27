@@ -7,7 +7,6 @@ load_dotenv()
 class BrowserTaskAgent:
     """A wrapper for browser_use.Agent to run autonomous browser tasks."""
     def __init__(self, llm=None):
-        # Use a LangChain-compatible Gemini LLM for browser agent tasks
         if llm:
             self.llm = llm
         else:

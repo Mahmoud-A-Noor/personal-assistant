@@ -129,12 +129,28 @@ class EmailTool:
 
     def _extract_email_body(self, msg: email.message.Message) -> str:
         """Extract the body content from an email message."""
+        def decode_payload(payload, charset):
+            try:
+                if charset:
+                    return payload.decode(charset)
+                else:
+                    return payload.decode()
+            except (UnicodeDecodeError, LookupError):
+                try:
+                    return payload.decode('utf-8', errors='replace')
+                except Exception:
+                    return payload.decode('latin-1', errors='replace')
+
         if msg.is_multipart():
             for part in msg.walk():
                 content_type = part.get_content_type()
                 if content_type == 'text/plain':
-                    return part.get_payload(decode=True).decode()
-        return msg.get_payload(decode=True).decode()
+                    payload = part.get_payload(decode=True)
+                    charset = part.get_content_charset()
+                    return decode_payload(payload, charset)
+        payload = msg.get_payload(decode=True)
+        charset = msg.get_content_charset()
+        return decode_payload(payload, charset)
 
     def _parse_email_date(self, date_str: str) -> datetime:
         """Parse the date string from an email message."""

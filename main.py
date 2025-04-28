@@ -4,15 +4,6 @@ import os
 from core.factory import build_tools_and_agents
 from core.assistant import PersonalAssistant
 
-##########################################################################################
-
-# TODO: make the agent able to run multiple tools or agents as required per request
-# Noori: You have 9 unread emails.
-# You: give me summary of them and mark them as read  
-# Noori: I have marked all the emails as read.
-
-##########################################################################################
-
 
 # Load environment variables
 load_dotenv()

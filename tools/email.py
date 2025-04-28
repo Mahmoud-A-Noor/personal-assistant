@@ -8,7 +8,7 @@ import smtplib
 import imaplib
 import email
 from email.mime.text import MIMEText
-from datetime import datetime
+from datetime import datetime, timezone
 from models.email import EmailSendInput, EmailMessage
 from dotenv import load_dotenv
 
@@ -130,6 +130,8 @@ class EmailTool:
     def _extract_email_body(self, msg: email.message.Message) -> str:
         """Extract the body content from an email message."""
         def decode_payload(payload, charset):
+            if payload is None:
+                return ''
             try:
                 if charset:
                     return payload.decode(charset)
@@ -153,20 +155,23 @@ class EmailTool:
         return decode_payload(payload, charset)
 
     def _parse_email_date(self, date_str: str) -> datetime:
-        """Parse the date string from an email message."""
+        """Parse the date string from an email message, always returning a timezone-aware datetime (UTC if missing)."""
         try:
+            # Try with timezone info
             email_date = datetime.strptime(
                 date_str.split('(')[0].strip(), 
                 '%a, %d %b %Y %H:%M:%S %z'
             )
         except (ValueError, AttributeError):
             try:
+                # Try without timezone, assume UTC
                 email_date = datetime.strptime(
                     date_str.split('(')[0].strip(),
                     '%a, %d %b %Y %H:%M:%S'
-                )
+                ).replace(tzinfo=timezone.utc)
             except (ValueError, AttributeError):
-                email_date = datetime.now()
+                # Fallback: now in UTC
+                email_date = datetime.now(timezone.utc)
         return email_date
 
 def get_email_tools() -> List[Tool]:

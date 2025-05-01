@@ -1,6 +1,5 @@
 from dotenv import load_dotenv
 import logging
-import os
 from core.factory import build_tools_and_agents
 from core.assistant import PersonalAssistant
 

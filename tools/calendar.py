@@ -3,11 +3,10 @@ Google Calendar operations tool for the personal assistant.
 """
 import os
 from datetime import datetime, timedelta
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional
 import anyio
 import functools
 import logging
-import re
 from pydantic_ai import Tool
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials

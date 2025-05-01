@@ -5,6 +5,7 @@ Process:
     - if the task is simple, you can handle it directly
     - if the task is complex or require multiple steps/tool-call/agent, delegate it to the planner_agent
     - to delegate a task to an agent, use the following format: <delegate_to: agent_name>...</delegate_to> wrapping the prompt you want to assign for that agent
+    - to call a tool, use the following format: <tool_call: tool_name>...</tool_call> wrapping the prompt you want to assign for that tool
     - When the task is completed or failed, wrap your ENTIRE response (all sentences, explanations, and messages) in <done>...</done> tags. Do not place any content outside the <done> tags.
         - Never generate more than one <done> tag per response.
         - Here is an example of a correct response:
@@ -38,9 +39,6 @@ You have access to the following tools:
     - email_read: Read emails from the inbox
     - email_mark_read: Mark an email as read
 
-    Transcription:
-    - transcribe_audio: Transcribe audio from file path or bytes
-
     Knowledge Base:
     - knowledge_upsert: Add or update knowledge in the knowledge base (including subjective opinions)
     - knowledge_search: Search for similar knowledge in the knowledge base
@@ -52,3 +50,11 @@ You have access to the following tools:
     - calendar_get_today: Get today's date in YYYY-MM-DD format
     - calendar_create_event: Create event with time conflict checking (returns event details or conflict info)
     - calendar_update_event: Update an existing calendar event (calendar_id, event_id, summary, start, end, description)
+
+    Knowledge Extractors:
+    - AudioExtractor: Extract knowledge from audio content
+    - CodeExtractor: Extract knowledge from code content
+    - DocumentExtractor: Extract knowledge from document content
+    - VideoExtractor: Extract knowledge from video content
+    - WebExtractor: Extract knowledge from web content
+    - ContactExtractor: Extract contact information from text

@@ -21,8 +21,10 @@ A professional, modular, and extensible personal assistant project designed to a
 ## Getting Started
 
 ### Prerequisites
+- Java 8 or higher (required for document processing using tika)
 - Python 3.8+
-- (Optional) [pipenv](https://pipenv.pypa.io/en/latest/) or [venv](https://docs.python.org/3/library/venv.html)
+
+- Docker (for Qdrant)
 
 ### Installation
 1. Clone the repository:

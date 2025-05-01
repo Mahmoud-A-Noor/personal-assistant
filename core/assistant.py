@@ -74,3 +74,5 @@ class PersonalAssistant:
 
     def _store_interaction(self, result):
         self.conversation_history.extend(result.new_messages())
+        self.conversation_history = self.conversation_history[-10:]
+        
